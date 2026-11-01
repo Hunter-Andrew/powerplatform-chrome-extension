@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Power Apps Form Inspector</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <header>
+    <img src="../icons/icon32.png" alt="" width="20" height="20">
+    <h1>Form Inspector</h1>
+    <span id="status" class="status">…</span>
+  </header>
+
+  <div id="notice" class="notice" hidden></div>
+
+  <main id="main">
+    <section>
+      <h2>Inspect</h2>
+      <button id="picker" class="primary big" data-needs-form>
+        <span class="ico">⌖</span>
+        <span><b>Pick element</b><small>Click a field, section or tab to get its logical name</small></span>
+        <kbd data-shortcut="toggle-picker"></kbd>
+      </button>
+      <div class="row">
+        <label class="toggle" data-needs-form>
+          <input type="checkbox" id="labels">
+          <span class="sw"></span>
+          <span>Show logical names <small>badges on every tab, section & field</small></span>
+          <kbd data-shortcut="toggle-labels"></kbd>
+        </label>
+      </div>
+      <button id="panel" class="big" data-needs-form>
+        <span class="ico">☰</span>
+        <span><b>All fields</b><small>Searchable list of attributes, values & types</small></span>
+      </button>
+    </section>
+
+    <section>
+      <h2>Form overrides <small>(client-side only, until you toggle off or navigate away)</small></h2>
+      <label class="toggle" data-needs-form>
+        <input type="checkbox" id="reveal">
+        <span class="sw"></span>
+        <span>Reveal hidden <small id="reveal-count">tabs, sections & fields</small></span>
+        <kbd data-shortcut="toggle-reveal"></kbd>
+      </label>
+      <label class="toggle" data-needs-form>
+        <input type="checkbox" id="unlock">
+        <span class="sw"></span>
+        <span>Unlock read-only fields <small id="unlock-count">enable disabled controls</small></span>
+      </label>
+      <label class="toggle" data-needs-form>
+        <input type="checkbox" id="optional">
+        <span class="sw"></span>
+        <span>Make all fields optional <small id="optional-count">clear required levels</small></span>
+      </label>
+    </section>
+
+    <section id="record-section" hidden>
+      <h2>Record</h2>
+      <dl id="record"></dl>
+      <div class="actions">
+        <button id="copy-url">Copy record URL</button>
+        <button id="open-api">Open in Web API</button>
+      </div>
+    </section>
+
+    <section id="env-section" hidden>
+      <h2>Environment</h2>
+      <dl id="env"></dl>
+    </section>
+  </main>
+
+  <footer>
+    <a href="#" id="shortcuts">Change keyboard shortcuts</a>
+  </footer>
+
+  <script type="module" src="popup.js"></script>
+</body>
+</html>
