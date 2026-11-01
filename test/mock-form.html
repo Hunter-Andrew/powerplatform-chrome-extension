@@ -2,10 +2,18 @@
 <style>body{font-family:Segoe UI;margin:0;padding:20px;background:#f3f2f1} ul{display:flex;gap:16px;list-style:none;padding:0} li{padding:6px 10px;background:#fff}
 section{background:#fff;margin:12px 0;padding:24px 12px 12px} .f{display:flex;gap:10px;padding:8px} .f label{width:140px} [hidden]{display:none!important}</style></head>
 <body>
+<iframe id="ClientApiFrame_crm" style="display:none" srcdoc="<script>window.Contoso={Account:{onLoad:function(c){}, onPhoneChange:function(c){ var t=Date.now(); while(Date.now()-t<15){} }}};</script>"></iframe>
 <ul role="tablist" id="tabs"></ul>
 <div id="form"></div>
 <script>
 // --- minimal fake Xrm with a UCI-like DOM ---
+function mkCtx(src){ return { getEventSource:()=>src, getEventArgs:()=>null, getDepth:()=>1, getFormContext:()=>window.Xrm.Page }; }
+// Like UCI: form libraries live in a ClientApiFrame iframe; the platform resolves handlers by name when an event fires.
+const FORM_HANDLERS = [['onload','form','Contoso.Account.onLoad'],['onchange','telephone1','Contoso.Account.onPhoneChange']];
+window.__formHandlers = (ev, target, ctx) => {
+  const w = document.getElementById('ClientApiFrame_crm').contentWindow;
+  FORM_HANDLERS.filter(([e,t])=>e===ev&&t===target).forEach(([, , fn]) => fn.split('.').reduce((o,k)=>o[k], w)(ctx));
+};
 const def = {
   tabs: [
     { name: 'SUMMARY_TAB', label: 'Summary', visible: true, sections: [
@@ -47,17 +55,29 @@ for (const t of def.tabs){
       let attr=attrs.find(a=>a.getName()===an);
       const ctl={ getName:()=>cn, getLabel:()=>label, getControlType:()=>type==='optionset'?'optionset':(type==='lookup'?'lookup':'standard'),
         getVisible:()=>st.vis, setVisible:(v)=>{st.vis=v; d.hidden=!v;}, getDisabled:()=>st.dis, setDisabled:(v)=>{st.dis=v; d.querySelector('input').disabled=v;},
-        getParent:()=>sec, setFocus:()=>{}, getAttribute:()=>attr };
-      if(!attr){ const actrls=[]; attr={ getName:()=>an, getAttributeType:()=>type, getFormat:()=>null, getValue:()=>st.val, getText:()=>type==='optionset'?'Consulting':null,
-        getRequiredLevel:()=>st.req, setRequiredLevel:(l)=>{st.req=l}, getIsDirty:()=>st.dirty, getSubmitMode:()=>'dirty', controls:col(actrls), _c:actrls}; attrs.push(attr);}
+        getParent:()=>sec, setFocus:()=>{}, getAttribute:()=>attr,
+        getOptions:()=> type==='optionset'? [{value:1,text:'Accounting'},{value:3,text:'Consulting'}] : undefined,
+        getEntityTypes:()=> type==='lookup'? ['systemuser','team'] : undefined };
+      if(!attr){ const actrls=[], handlers=[]; attr={ getName:()=>an, getAttributeType:()=>type, getFormat:()=>null, getValue:()=>st.val, setValue:(v)=>{st.val=v}, getText:()=>type==='optionset'?'Consulting':null,
+        getOptions:()=> type==='optionset'? [{value:1,text:'Accounting'},{value:3,text:'Consulting'},{value:7,text:'Retail'}] : undefined,
+        getRequiredLevel:()=>st.req, setRequiredLevel:(l)=>{st.req=l}, getIsDirty:()=>st.dirty, getSubmitMode:()=>'dirty', controls:col(actrls), _c:actrls,
+        addOnChange:(f)=>handlers.push(f), removeOnChange:(f)=>{const i=handlers.indexOf(f); if(i>=0) handlers.splice(i,1);},
+        fireOnChange:()=>{ const ctx=mkCtx(attr); window.__formHandlers('onchange', an, ctx); handlers.slice().forEach(f=>f(ctx)); } }; attrs.push(attr);}
       attr._c.push(ctl); controls.push(ctl); sctrls.push(ctl);
     }
   }
 }
+const stage=(id,name,cat,steps)=>({getId:()=>id,getName:()=>name,getEntityName:()=>'account',getCategory:()=>({getValue:()=>cat}),getStatus:()=>'active',
+  getSteps:()=>col(steps.map(([n,a,r])=>({getName:()=>n,getAttribute:()=>a,isRequired:()=>r})))});
+const stages=[stage('aaaa0001-0000-0000-0000-000000000001','Qualify',0,[['Phone','telephone1',true]]), stage('aaaa0001-0000-0000-0000-000000000002','Develop',1,[['Revenue','revenue',false]])];
+const saveHandlers=[];
 window.Xrm = {
-  Page: { ui: { tabs: col(tabs), controls: col(controls), getFormType:()=>2, formSelector:{ getCurrentItem:()=>({getId:()=>'{F0F0-1}', getLabel:()=>'Account Main'}) } },
-          data: { entity: { getEntityName:()=>'account', getId:()=>'{1234ABCD-0000-0000-0000-000000000001}', getIsDirty:()=>false, getPrimaryAttributeValue:()=>'Contoso', attributes: col(attrs) } } },
-  Utility: { getEntityMetadata: async (e)=>({EntitySetName: e+'s'}),
+  Page: { ui: { tabs: col(tabs), controls: col(controls), getFormType:()=>2, formSelector:{ getCurrentItem:()=>({getId:()=>'{F0F0-0000-0000-0000-000000000001}', getLabel:()=>'Account Main'}) } },
+          data: { process: { getActiveProcess:()=>({getId:()=>'{BBBB0001-0000-0000-0000-000000000001}', getName:()=>'Account Sales Process', getStages:()=>col(stages)}),
+                    getActiveStage:()=>stages[0], getSelectedStage:()=>stages[0], getActivePath:()=>col(stages), getInstanceId:()=>'cccc0001-0000-0000-0000-000000000001',
+                    getInstanceName:()=>'Account Sales Process', getStatus:()=>'active', getEnabledProcesses:(cb)=>cb({'BBBB0001-0000-0000-0000-000000000001':'Account Sales Process'}) },
+            entity: { addOnSave:(f)=>saveHandlers.push(f), removeOnSave:(f)=>{const i=saveHandlers.indexOf(f); if(i>=0) saveHandlers.splice(i,1);}, getEntityName:()=>'account', getId:()=>'{1234ABCD-0000-0000-0000-000000000001}', getIsDirty:()=>false, getPrimaryAttributeValue:()=>'Contoso', attributes: col(attrs) } } },
+  Utility: { getEntityMetadata: async (e)=>({EntitySetName: e==='systemuser'?'systemusers':e+'s'}),
     getGlobalContext: ()=>({ getClientUrl:()=>location.origin, getVersion:()=>'9.2.26101.123', organizationSettings:{uniqueName:'orgcontoso', organizationId:'{ORG-1}'},
       userSettings:{userName:'Andrew', userId:'{USER-1}', roles: col([{id:'1',name:'System Administrator'}])}, getCurrentAppProperties: async()=>({displayName:'Sales Hub', uniqueName:'msdynce_saleshub', appId:'APP-1'}) }) },
 };

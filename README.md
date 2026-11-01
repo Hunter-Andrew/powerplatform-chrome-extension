@@ -16,8 +16,38 @@ The extension is **Power Apps Form Inspector**: developer tools for Power Apps m
 | **Make all fields optional** | Sets every required level to `none`, so you can save without filling required fields. Toggle off to restore the original levels. |
 | **Record info** | Shows entity, entity set, record ID, form name/ID and form type. Includes **Copy record URL** and **Open in Web API** (opens `/api/data/v9.2/<set>(<id>)`). |
 | **Environment info** | Shows org unique name, URL, version, app name/ID, user, user ID and security roles. Click any value to copy it. |
+| **Production guardrail** | The popup shows which environment you're on, color-coded (red = production, amber = test, green = dev). Before **Unlock read-only fields** or **Make all fields optional** turns on in production, it asks you to confirm. Pick the environment type from the drop-down to mark it. Unmarked orgs are guessed from their name (e.g. `contoso-dev`, `contoso-uat`); anything that doesn't look like dev or test is treated as production. Marks are saved per host in Chrome sync storage. |
+
+### Developer tools panel
+
+The **Developer tools** buttons in the popup open a side panel on the form with five tabs. Everything in it is read-only.
+
+| Tab | What it does |
+|---|---|
+| **Events** | Lists every handler registered on the form (OnLoad, OnSave, OnChange, TabStateChange, ...) with its function, library, enabled flag and "pass execution context" flag, plus the form's libraries (click to open the web resource). **Start monitor** logs every handler call live, with the field or event that triggered it, its duration (async handlers are timed until their promise settles) and any error it throws. Handlers added in code with `addOnChange`, `addOnSave`, `addOnLoad`, `addTabStateChange` and the BPF `addOnStage...` methods while the monitor is on are logged too. ⚑ rows mark the event itself. **Copy log** copies it as tab-separated text. |
+| **Logic** | Lists the table's business rules (state, scope and every field each rule reads, sets, locks, hides, requires or shows a message on) and its calculated, rollup and formula columns (with the fields they use). Type a field name to see only what touches it, or click **Logic** on a field's picker card. |
+| **Options** | Lists every option set, multi-select and Yes/No field with each option's integer value and label, the current value, the option set name (global or local) and options removed from this form's control. Click a value to copy it. Tick **Include fields not on form** to see all of the table's option set fields. |
+| **Lookups** | Lists every lookup on the form with its target tables and current value(s): name, table and GUID. Buttons copy a Web API filter (`_parentaccountid_value eq <guid>`), open the record, or open it in the Web API. |
+| **Process** | Shows the active business process flow: process ID, instance ID, status, active stage, the traversed path, the other flows enabled for the record, and every stage with its stage ID, table, category and steps (field, required). |
+
+**Events monitor limits.** The form's OnLoad usually runs before the monitor can hook in. Turn the monitor on, then open another record in the same app to catch OnLoad. Form handlers are timed by wrapping the named functions in the page's script frames. If a handler can't be found by name, it's shown in the monitor summary, and you still see the ⚑ event rows.
 
 All overrides happen **client-side only**. They use the standard `Xrm` client API (`setVisible`, `setDisabled`, `setRequiredLevel`) and nothing is written to the form definition. Navigating to another record resets them.
+
+## Permissions and privileges
+
+The extension only uses the `activeTab`, `scripting` and `storage` permissions, plus host access to Dynamics domains. Most tools use only the client-side `Xrm` API and work for any user who can open the form.
+
+The Developer tools panel also makes **read-only Web API GET requests** with your own session. It never writes anything. If a privilege is missing, that part of the panel shows an error and the rest keeps working:
+
+| Data | Web API request | Privilege needed |
+|---|---|---|
+| Form event handlers and libraries (Events) | `systemforms(<formid>)?$select=formxml` | Read on **System Form** (most security roles have this) |
+| Business rules (Logic) | `workflows?$filter=category eq 2 ...` | Read on **Process**. Use organization level to see rules owned by other users. |
+| Calculated, rollup and formula columns (Logic), option set names and options not on the form (Options) | `EntityDefinitions(...)/Attributes` | None. Every user can read table metadata. |
+| BPF table and traversed path (Process) | `workflows(<id>)`, `<bpf entity set>(<instance id>)` | Read on **Process** and on the BPF table |
+
+Stages, steps, option values and lookups come from the client API, so they show up even without these privileges. System Administrator is not required.
 
 ## Install (unpacked)
 
@@ -30,7 +60,7 @@ You can change shortcuts at `chrome://extensions/shortcuts`.
 
 ## How it works
 
-- `src/main.js` runs in the page's **MAIN world** (needs Chrome 111+) so it can reach `window.Xrm`. It exposes `window.__pafi.run(cmd)`.
+- `src/main.js` runs in the page's **MAIN world** (needs Chrome 111+) so it can reach `window.Xrm`. It exposes `window.__pafi.run(cmd)`. `src/devtools.js` loads right after it and adds the Developer tools panel commands (`dev`, `monitor`).
 - The popup and the keyboard shortcuts call it through `chrome.scripting.executeScript` (`src/bridge.js`). If the script isn't on the page yet (for example, the tab was open before you installed the extension), the bridge injects it on demand.
 - The picker maps DOM to components using Unified Interface attributes (`data-id="<control>-FieldSectionItemContainer"`, `data-control-name`, `data-lp-id`, `section[data-id]`, `data-id="tablist-<tab>"`). It then **checks each candidate against `Xrm`**, so it only reports names that actually exist on the form.
 - The overlays are drawn in a Shadow DOM layer and never touch the app's React DOM.
@@ -39,7 +69,7 @@ Host permissions cover `*.dynamics.com`, plus the GCC High/DoD (`microsoftdynami
 
 ## Tests
 
-`test/` has a mock UCI form with a fake `Xrm`. To run it end-to-end with Playwright:
+`test/` has a mock UCI form with a fake `Xrm` (including a BPF, option sets, lookups and a `ClientApiFrame` with form scripts) and canned Web API responses (`test/api-fixtures.js`). The test also checks that every Web API call is a GET. To run it end-to-end with Playwright:
 
 ```
 node test/run.js [screenshotDir]
@@ -50,11 +80,13 @@ node test/run.js [screenshotDir]
 ```
 manifest.json        Extension manifest (MV3)
 src/main.js          Page-world script: Xrm access, picker, overlays, panel, overrides
+src/devtools.js      Page-world script: Developer tools panel (events, logic, options, lookups, process)
+src/env.js           Environment classification for the production guardrail (popup)
 src/bridge.js        Runs commands in the page via chrome.scripting (shared by popup + worker)
 src/background.js    Service worker: keyboard shortcuts
 popup/               Toolbar popup (HTML/CSS/JS)
 icons/               Extension icons
-test/                Mock UCI form + Playwright end-to-end test
+test/                Mock UCI form, Web API fixtures + Playwright end-to-end test
 ```
 
 ## Packaging

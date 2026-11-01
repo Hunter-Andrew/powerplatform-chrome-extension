@@ -12,7 +12,27 @@
     <span id="status" class="status">…</span>
   </header>
 
+  <div id="envbar" class="envbar" hidden>
+    <span class="envdot"></span>
+    <span id="env-host" class="envhost"></span>
+    <select id="env-tag" title="How the production guardrail treats this environment">
+      <option value="">Auto</option>
+      <option value="prod">Production</option>
+      <option value="test">Test</option>
+      <option value="dev">Development</option>
+    </select>
+  </div>
+
   <div id="notice" class="notice" hidden></div>
+
+  <div id="guard" class="guard" hidden>
+    <b>This looks like a production environment</b>
+    <p id="guard-text"></p>
+    <div class="actions">
+      <button id="guard-go" class="danger">Turn on anyway</button>
+      <button id="guard-cancel">Cancel</button>
+    </div>
+  </div>
 
   <main id="main">
     <section>
@@ -34,6 +54,17 @@
         <span class="ico">☰</span>
         <span><b>All fields</b><small>Searchable list of attributes, values & types</small></span>
       </button>
+    </section>
+
+    <section>
+      <h2>Developer tools</h2>
+      <div class="tiles">
+        <button class="tile" data-dev="events" data-needs-form><b>Events &amp; scripts</b><small>Form handlers + live monitor</small></button>
+        <button class="tile" data-dev="logic" data-needs-form><b>Business rules</b><small>Rules &amp; calculated columns</small></button>
+        <button class="tile" data-dev="options" data-needs-form><b>Option sets</b><small>Values &amp; integer codes</small></button>
+        <button class="tile" data-dev="lookups" data-needs-form><b>Lookups</b><small>GUIDs &amp; Web API filters</small></button>
+        <button class="tile" data-dev="process" data-needs-form><b>Process flow</b><small>BPF stages, steps &amp; GUIDs</small></button>
+      </div>
     </section>
 
     <section>

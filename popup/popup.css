@@ -8,6 +8,9 @@
   --accent-soft: #f5e9f5;
   --ok: #059669;
   --warn: #b45309;
+  --prod: #dc2626;
+  --test: #d97706;
+  --dev: #059669;
 }
 @media (prefers-color-scheme: dark) {
   :root {
@@ -20,6 +23,9 @@
     --accent-soft: #3a2a3a;
     --ok: #34d399;
     --warn: #fbbf24;
+    --prod: #f87171;
+    --test: #fbbf24;
+    --dev: #34d399;
   }
 }
 * { box-sizing: border-box; }
@@ -79,3 +85,20 @@ dd.copy:hover { background: var(--accent-soft); }
 footer { padding: 8px 12px; text-align: right; }
 footer a { color: var(--muted); font-size: 11px; }
 .flash { position: fixed; bottom: 10px; left: 50%; transform: translateX(-50%); background: #111827; color: #fff; padding: 5px 10px; border-radius: 5px; font-size: 12px; }
+
+.envbar { display: flex; align-items: center; gap: 8px; padding: 6px 12px; border-bottom: 1px solid var(--line); font-size: 12px; }
+.envbar.prod { background: color-mix(in srgb, var(--prod) 12%, transparent); }
+.envdot { width: 9px; height: 9px; border-radius: 50%; background: var(--muted); flex: none; }
+.envbar.prod .envdot { background: var(--prod); }
+.envbar.test .envdot { background: var(--test); }
+.envbar.dev .envdot { background: var(--dev); }
+.envhost { flex: 1; font-family: Consolas, "Cascadia Mono", monospace; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.envbar select { font: inherit; font-size: 12px; color: inherit; background: var(--card); border: 1px solid var(--line); border-radius: 4px; padding: 1px 4px; }
+.guard { margin: 10px 12px 0; padding: 10px; border-radius: 6px; border: 1px solid var(--prod); background: color-mix(in srgb, var(--prod) 10%, transparent); font-size: 12px; }
+.guard p { margin: 6px 0 8px; }
+.guard button.danger { background: var(--prod); border-color: var(--prod); color: #fff; }
+.tiles { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+.tile { text-align: left; padding: 7px 9px; border: 1px solid var(--line); background: var(--card); border-radius: 8px; }
+.tile:hover { border-color: var(--accent); }
+.tile b { display: block; font-size: 12px; }
+.tile:last-child:nth-child(odd) { grid-column: 1 / -1; }

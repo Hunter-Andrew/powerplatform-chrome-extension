@@ -2,8 +2,8 @@
   "manifest_version": 3,
   "name": "Power Apps Form Inspector",
   "short_name": "PA Inspector",
-  "version": "1.0.0",
-  "description": "Developer tools for Power Apps model-driven forms: reveal hidden tabs/sections/fields, pick elements to get logical names, and more.",
+  "version": "1.1.0",
+  "description": "Developer tools for Power Apps model-driven forms: logical names, hidden fields, form event debugger, business rules, option sets, BPF stages and more.",
   "minimum_chrome_version": "111",
   "icons": {
     "16": "icons/icon16.png",
@@ -25,7 +25,8 @@
   },
   "permissions": [
     "activeTab",
-    "scripting"
+    "scripting",
+    "storage"
   ],
   "host_permissions": [
     "https://*.dynamics.com/*",
@@ -44,7 +45,8 @@
         "https://*.appsplatform.us/*"
       ],
       "js": [
-        "src/main.js"
+        "src/main.js",
+        "src/devtools.js"
       ],
       "world": "MAIN",
       "run_at": "document_idle"

@@ -1,7 +1,9 @@
 import { runInTab } from '../src/bridge.js';
+import { classify, setTag, LABELS } from '../src/env.js';
 
 const $ = (id) => document.getElementById(id);
 let tabId = null;
+let env = null; // result of classify(host)
 
 function flash(msg) {
   document.querySelectorAll('.flash').forEach((f) => f.remove());
@@ -73,9 +75,29 @@ function fillDl(dl, rows) {
   });
 }
 
+async function refreshEnv(host) {
+  if (!host) return;
+  env = await classify(host);
+  const bar = $('envbar');
+  bar.hidden = false;
+  bar.className = `envbar ${env.effective}`;
+  $('env-host').textContent = host;
+  $('env-host').title = env.tag
+    ? `Marked as ${LABELS[env.tag]}`
+    : `Not marked yet. Guessed ${LABELS[env.guess]} from the org name; choose a type to override.`;
+  const sel = $('env-tag');
+  sel.options[0].textContent = `Auto (${LABELS[env.guess]})`;
+  sel.value = env.tag || '';
+}
+
 async function refreshInfo() {
   const info = await run('info');
   if (!info) return;
+  try {
+    await refreshEnv(info.env && info.env.clientUrl ? new URL(info.env.clientUrl).host : '');
+  } catch (e) {
+    console.warn(e);
+  }
   if (info.record) {
     const r = info.record;
     $('record-section').hidden = false;
@@ -109,11 +131,34 @@ async function refreshInfo() {
   }
 }
 
+async function toggle(cmd) {
+  const res = await run(cmd);
+  if (res && res.error) notice(res.error);
+  await refreshStatus();
+}
+
 function bindToggle(id, cmd) {
-  $(id).addEventListener('change', async () => {
-    const res = await run(cmd);
-    if (res && res.error) notice(res.error);
-    await refreshStatus();
+  $(id).addEventListener('change', () => toggle(cmd));
+}
+
+// Production guardrail: confirm before tools that let you change data you normally can't.
+const GUARDED = {
+  unlock: 'Unlocking read-only fields lets you edit values the app normally protects. If you save the record, those values are written to production.',
+  optional: 'Clearing required levels lets you save records with required fields left empty. If you save the record, that data is written to production.',
+};
+
+function bindGuardedToggle(id, cmd) {
+  $(id).addEventListener('change', () => {
+    const turningOn = $(id).checked;
+    if (!turningOn || !env || !env.isProd) return toggle(cmd);
+    $(id).checked = false;
+    $('guard-text').textContent = `${env.host} is ${env.tag ? 'marked as Production' : 'treated as Production (not marked as Dev or Test)'}. ${GUARDED[cmd]}`;
+    $('guard').hidden = false;
+    $('guard-go').onclick = async () => {
+      $('guard').hidden = true;
+      await toggle(cmd);
+    };
+    $('guard-cancel').onclick = () => { $('guard').hidden = true; };
   });
 }
 
@@ -142,8 +187,20 @@ async function init() {
 
   bindToggle('labels', 'labels');
   bindToggle('reveal', 'reveal');
-  bindToggle('unlock', 'unlock');
-  bindToggle('optional', 'optional');
+  bindGuardedToggle('unlock', 'unlock');
+  bindGuardedToggle('optional', 'optional');
+
+  $('env-tag').addEventListener('change', async () => {
+    if (!env) return;
+    await setTag(env.host, $('env-tag').value || null);
+    await refreshEnv(env.host);
+  });
+
+  document.querySelectorAll('[data-dev]').forEach((b) => b.addEventListener('click', async () => {
+    const res = await run('dev', { tab: b.dataset.dev });
+    if (res && res.error) return notice(res.error);
+    window.close();
+  }));
 
   $('picker').addEventListener('click', async () => {
     const res = await run('picker');
