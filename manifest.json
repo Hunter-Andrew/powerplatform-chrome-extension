@@ -1,0 +1,73 @@
+{
+  "manifest_version": 3,
+  "name": "Power Apps Form Inspector",
+  "short_name": "PA Inspector",
+  "version": "1.0.0",
+  "description": "Developer tools for Power Apps model-driven forms: reveal hidden tabs/sections/fields, pick elements to get logical names, and more.",
+  "minimum_chrome_version": "111",
+  "icons": {
+    "16": "icons/icon16.png",
+    "32": "icons/icon32.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  },
+  "action": {
+    "default_popup": "popup/popup.html",
+    "default_title": "Power Apps Form Inspector",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "32": "icons/icon32.png"
+    }
+  },
+  "background": {
+    "service_worker": "src/background.js",
+    "type": "module"
+  },
+  "permissions": [
+    "activeTab",
+    "scripting"
+  ],
+  "host_permissions": [
+    "https://*.dynamics.com/*",
+    "https://*.microsoftdynamics.us/*",
+    "https://*.microsoftdynamics.de/*",
+    "https://*.dynamics.cn/*",
+    "https://*.appsplatform.us/*"
+  ],
+  "content_scripts": [
+    {
+      "matches": [
+        "https://*.dynamics.com/*",
+        "https://*.microsoftdynamics.us/*",
+        "https://*.microsoftdynamics.de/*",
+        "https://*.dynamics.cn/*",
+        "https://*.appsplatform.us/*"
+      ],
+      "js": [
+        "src/main.js"
+      ],
+      "world": "MAIN",
+      "run_at": "document_idle"
+    }
+  ],
+  "commands": {
+    "toggle-picker": {
+      "suggested_key": {
+        "default": "Alt+Shift+I"
+      },
+      "description": "Pick a field / section / tab to see its logical name"
+    },
+    "toggle-labels": {
+      "suggested_key": {
+        "default": "Alt+Shift+L"
+      },
+      "description": "Toggle logical-name badges on the form"
+    },
+    "toggle-reveal": {
+      "suggested_key": {
+        "default": "Alt+Shift+H"
+      },
+      "description": "Reveal / re-hide all hidden tabs, sections and fields"
+    }
+  }
+}

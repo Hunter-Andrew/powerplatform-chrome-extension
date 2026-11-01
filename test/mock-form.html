@@ -1,0 +1,64 @@
+<!doctype html><html><head><meta charset="utf-8"><title>Account: Contoso</title>
+<style>body{font-family:Segoe UI;margin:0;padding:20px;background:#f3f2f1} ul{display:flex;gap:16px;list-style:none;padding:0} li{padding:6px 10px;background:#fff}
+section{background:#fff;margin:12px 0;padding:24px 12px 12px} .f{display:flex;gap:10px;padding:8px} .f label{width:140px} [hidden]{display:none!important}</style></head>
+<body>
+<ul role="tablist" id="tabs"></ul>
+<div id="form"></div>
+<script>
+// --- minimal fake Xrm with a UCI-like DOM ---
+const def = {
+  tabs: [
+    { name: 'SUMMARY_TAB', label: 'Summary', visible: true, sections: [
+      { name: 'ACCOUNT_INFORMATION', label: 'Account Information', visible: true, fields: [
+        ['name','name','Account Name','string','Contoso',true,false,'required'],
+        ['telephone1','telephone1','Phone','string','555-0100',true,false,'none'],
+        ['header_ownerid','ownerid','Owner','lookup',[{id:'{AAAA-1}',name:'Andrew',entityType:'systemuser'}],true,true,'none'],
+        ['secretfield','new_secret','Secret','string','shh',false,false,'recommended'],
+      ]},
+      { name: 'HIDDEN_SECTION', label: 'Hidden Section', visible: false, fields: [
+        ['industrycode','industrycode','Industry','optionset',3,true,true,'none'],
+      ]},
+    ]},
+    { name: 'DETAILS_TAB', label: 'Details', visible: false, sections: [
+      { name: 'DETAILS_SECTION', label: 'Details', visible: true, fields: [
+        ['revenue','revenue','Revenue','money',1000,true,false,'none'],
+      ]},
+    ]},
+  ],
+};
+function col(items){ return { get:(k)=> k===undefined? items : (typeof k==='number'? items[k] : items.find(i=>i.getName()===k)||null), forEach:(f)=>items.forEach(f), getLength:()=>items.length }; }
+const tabs=[], allSections=[], controls=[], attrs=[];
+for (const t of def.tabs){
+  const li=document.createElement('li'); li.setAttribute('role','tab'); li.setAttribute('data-id','tablist-'+t.name); li.textContent=t.label; li.hidden=!t.visible; document.getElementById('tabs').appendChild(li);
+  const panel=document.createElement('div'); panel.setAttribute('role','tabpanel'); panel.setAttribute('data-id','tabpanel-'+t.name); panel.hidden=!t.visible; document.getElementById('form').appendChild(panel);
+  const secs=[];
+  const tab={ getName:()=>t.name, getLabel:()=>t.label, getVisible:()=>t.visible, setVisible:(v)=>{t.visible=v; li.hidden=!v; panel.hidden=!v;}, getDisplayState:()=>'expanded', setFocus:()=>{}, sections:col(secs) };
+  tabs.push(tab);
+  for (const s of t.sections){
+    const se=document.createElement('section'); se.setAttribute('data-id',s.name); se.setAttribute('aria-label',s.label); se.hidden=!s.visible; panel.appendChild(se);
+    const sctrls=[];
+    const sec={ getName:()=>s.name, getLabel:()=>s.label, getVisible:()=>s.visible, setVisible:(v)=>{s.visible=v; se.hidden=!v;}, getParent:()=>tab, controls:col(sctrls)};
+    secs.push(sec); allSections.push(sec);
+    for (const [cn,an,label,type,val,vis,dis,req] of s.fields){
+      const d=document.createElement('div'); d.className='f'; d.setAttribute('data-id',cn+'-FieldSectionItemContainer'); d.hidden=!vis;
+      d.innerHTML='<label>'+label+'</label><div data-lp-id="MscrmControls.FieldControls.TextBoxControl|'+cn+'.fieldControl|account"><input value="'+(Array.isArray(val)?val[0].name:val)+'"'+(dis?' disabled':'')+'></div>';
+      se.appendChild(d);
+      let st={vis,dis,req,val,dirty:false};
+      let attr=attrs.find(a=>a.getName()===an);
+      const ctl={ getName:()=>cn, getLabel:()=>label, getControlType:()=>type==='optionset'?'optionset':(type==='lookup'?'lookup':'standard'),
+        getVisible:()=>st.vis, setVisible:(v)=>{st.vis=v; d.hidden=!v;}, getDisabled:()=>st.dis, setDisabled:(v)=>{st.dis=v; d.querySelector('input').disabled=v;},
+        getParent:()=>sec, setFocus:()=>{}, getAttribute:()=>attr };
+      if(!attr){ const actrls=[]; attr={ getName:()=>an, getAttributeType:()=>type, getFormat:()=>null, getValue:()=>st.val, getText:()=>type==='optionset'?'Consulting':null,
+        getRequiredLevel:()=>st.req, setRequiredLevel:(l)=>{st.req=l}, getIsDirty:()=>st.dirty, getSubmitMode:()=>'dirty', controls:col(actrls), _c:actrls}; attrs.push(attr);}
+      attr._c.push(ctl); controls.push(ctl); sctrls.push(ctl);
+    }
+  }
+}
+window.Xrm = {
+  Page: { ui: { tabs: col(tabs), controls: col(controls), getFormType:()=>2, formSelector:{ getCurrentItem:()=>({getId:()=>'{F0F0-1}', getLabel:()=>'Account Main'}) } },
+          data: { entity: { getEntityName:()=>'account', getId:()=>'{1234ABCD-0000-0000-0000-000000000001}', getIsDirty:()=>false, getPrimaryAttributeValue:()=>'Contoso', attributes: col(attrs) } } },
+  Utility: { getEntityMetadata: async (e)=>({EntitySetName: e+'s'}),
+    getGlobalContext: ()=>({ getClientUrl:()=>location.origin, getVersion:()=>'9.2.26101.123', organizationSettings:{uniqueName:'orgcontoso', organizationId:'{ORG-1}'},
+      userSettings:{userName:'Andrew', userId:'{USER-1}', roles: col([{id:'1',name:'System Administrator'}])}, getCurrentAppProperties: async()=>({displayName:'Sales Hub', uniqueName:'msdynce_saleshub', appId:'APP-1'}) }) },
+};
+</script></body></html>
