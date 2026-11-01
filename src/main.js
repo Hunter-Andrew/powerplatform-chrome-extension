@@ -780,6 +780,7 @@
   // ---------------------------------------------------------------------------
   let card = null;
   let cardKeyHandler = null;
+  const cardActions = []; // extra header buttons added by src/devtools.js: (info, closeCard) => element | null
 
   function closeCard() {
     if (card) card.remove();
@@ -798,6 +799,7 @@
         info.hidden ? h('span', { className: 'pill hidden', title: 'Hidden on the form; shown by "Reveal hidden"' }, 'hidden') : null,
         h('span', { className: 'title', title: info.primary }, info.primary),
         h('button', { className: 'btn', onclick: () => copy(info.primary) }, 'Copy'),
+        ...cardActions.map((fn) => safe(() => fn(info, closeCard), null)),
         h('button', { className: 'btn', onclick: () => { closeCard(); startPicking(); } }, 'Pick another'),
         h('button', { className: 'x', title: 'Close (Esc)', onclick: closeCard }, '×'),
       ),
@@ -895,6 +897,7 @@
     }
     const fc = getFC();
     if (!fc) return { error: 'No model-driven form found on this page.' };
+    safe(() => window.__pafi.lib.closeDev && window.__pafi.lib.closeDev());
     ensureHost();
     let rows = collectFields(fc);
     const search = h('input', { type: 'search', placeholder: 'Filter by logical name, label, type or value…' });
@@ -1016,10 +1019,12 @@
     return out;
   }
 
+  const statusExtras = []; // (out) => void, from src/devtools.js
+
   function status() {
     const fc = getFC();
     syncForm(fc);
-    return {
+    const out = {
       hasXrm: !!window.Xrm,
       hasForm: !!fc,
       reveal: { active: state.revealActive, count: state.revealed.length },
@@ -1029,6 +1034,8 @@
       picking: state.picking,
       panel: !!panel,
     };
+    statusExtras.forEach((fn) => safe(() => fn(out)));
+    return out;
   }
 
   // ---------------------------------------------------------------------------
@@ -1046,7 +1053,15 @@
   };
 
   window.__pafi = {
-    version: '1.0.0',
+    version: '1.1.0',
+    // Shared helpers for src/devtools.js (loaded right after this file).
+    lib: {
+      safe, cleanId, getFC, forEachCol, getTabs, getSections, getControls, lookup, fmtValue,
+      h, ensureHost, getRoot: () => root, toast, copy, flash, closeCard, closePanel: () => closePanel(),
+      register: (name, fn) => { commands[name] = fn; },
+      addCardAction: (fn) => cardActions.push(fn),
+      addStatus: (fn) => statusExtras.push(fn),
+    },
     run(cmd, arg) {
       const fn = commands[cmd];
       if (!fn) return { error: `Unknown command: ${cmd}` };
