@@ -12,6 +12,11 @@
     <span id="status" class="status">…</span>
   </header>
 
+  <div class="toolbar">
+    <span id="active-count" class="muted">All toggles off</span>
+    <button id="reset" class="reset" title="Turn every toggle off and restore the form"><span aria-hidden="true">↺</span> Reset all <kbd data-shortcut="reset-toggles"></kbd></button>
+  </div>
+
   <div id="envbar" class="envbar" hidden>
     <span class="envdot"></span>
     <span id="env-host" class="envhost"></span>
@@ -68,7 +73,7 @@
     </section>
 
     <section>
-      <h2>Form overrides <small>(client-side only, until you toggle off or navigate away)</small></h2>
+      <h2>Form overrides <small>(client-side only, stays on in this tab until you toggle off)</small></h2>
       <label class="toggle" data-needs-form>
         <input type="checkbox" id="reveal">
         <span class="sw"></span>

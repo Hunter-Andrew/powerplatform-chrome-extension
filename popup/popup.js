@@ -1,4 +1,4 @@
-import { runInTab } from '../src/bridge.js';
+import { runInTab, saveToggles, clearToggles, tabHost } from '../src/bridge.js';
 import { classify, setTag, LABELS } from '../src/env.js';
 
 const $ = (id) => document.getElementById(id);
@@ -57,6 +57,10 @@ async function refreshStatus() {
   setCount('reveal-count', st.reveal, 'tabs, sections & fields', 'item(s) revealed');
   setCount('unlock-count', st.unlock, 'enable disabled controls', 'field(s) unlocked');
   setCount('optional-count', st.optional, 'clear required levels', 'field(s) made optional');
+  const on = [st.labels, st.reveal.active, st.unlock.active, st.optional.active].filter(Boolean).length;
+  $('reset').disabled = !on;
+  $('active-count').textContent = on ? `${on} toggle${on > 1 ? 's' : ''} on in this tab` : 'All toggles off';
+  $('active-count').classList.toggle('on', !!on);
   return st;
 }
 
@@ -131,10 +135,27 @@ async function refreshInfo() {
   }
 }
 
+// Remember what's on for this tab + host, so src/background.js can re-apply it after a reload.
+async function persist(st) {
+  try {
+    await saveToggles(tabId, st, await tabHost(tabId));
+  } catch (e) {
+    console.warn(e);
+  }
+}
+
 async function toggle(cmd) {
   const res = await run(cmd);
   if (res && res.error) notice(res.error);
+  await persist(await refreshStatus());
+}
+
+async function resetAll() {
+  const res = await run('reset');
+  if (res && res.error) return notice(res.error);
+  await clearToggles(tabId);
   await refreshStatus();
+  flash('All toggles reset');
 }
 
 function bindToggle(id, cmd) {
@@ -179,6 +200,7 @@ async function init() {
     tabId = tab && tab.id;
   }
 
+  $('reset').disabled = true;
   showShortcuts();
   $('shortcuts').addEventListener('click', (e) => {
     e.preventDefault();
@@ -189,6 +211,7 @@ async function init() {
   bindToggle('reveal', 'reveal');
   bindGuardedToggle('unlock', 'unlock');
   bindGuardedToggle('optional', 'optional');
+  $('reset').addEventListener('click', resetAll);
 
   $('env-tag').addEventListener('change', async () => {
     if (!env) return;

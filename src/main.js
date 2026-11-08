@@ -14,6 +14,9 @@
     hidden: '#f59e0b',
   };
 
+  // The *Active flags and `labels` are the desired state: they stay on across record/form navigation
+  // (and are restored after a reload by src/background.js) until the user turns them off.
+  // The lists record what was changed on the current form, so turning a toggle off restores only that.
   const state = {
     formKey: null,
     revealActive: false,
@@ -24,6 +27,7 @@
     optional: [], // { name, level }
     labels: false,
     picking: false,
+    restorePending: null, // names of toggles turned on by `restore`, until the first tick that sees a form
   };
 
   const safe = (fn, fallback) => {
@@ -94,23 +98,23 @@
     return `${entity}|${formId}|${id}`;
   }
 
-  /** Reset per-form state when the user navigates to another record/form. */
+  /**
+   * Forget what was changed on the previous form when the user navigates to another record/form.
+   * The toggles themselves stay on; the enforcement tick re-applies them to the new form.
+   */
   function syncForm(fc) {
     const key = fc ? formKey(fc) : null;
-    if (key === state.formKey) return;
+    if (key === state.formKey) return false;
     // A new record being saved (empty id -> guid) is still the same form.
     const prev = state.formKey ? state.formKey.split('|') : null;
     const next = key ? key.split('|') : null;
     const sameUnsaved = prev && next && prev[0] === next[0] && prev[1] === next[1] && prev[2] === '';
-    if (!sameUnsaved) {
-      state.revealActive = false;
-      state.revealed = [];
-      state.unlockActive = false;
-      state.unlocked = [];
-      state.optionalActive = false;
-      state.optional = [];
-    }
     state.formKey = key;
+    if (sameUnsaved) return false;
+    state.revealed = [];
+    state.unlocked = [];
+    state.optional = [];
+    return true;
   }
 
   // ---------------------------------------------------------------------------
@@ -535,10 +539,18 @@
     nodes.clear();
   }
 
+  const anyActive = () => state.labels || state.revealActive || state.unlockActive || state.optionalActive;
+
+  /** Runs every 500 ms while any toggle is on: keeps the overrides applied, then redraws the overlay. */
+  function tick() {
+    enforce();
+    scheduleRender();
+  }
+
   function updateRenderLoop() {
-    const active = state.labels || state.revealActive;
+    const active = anyActive();
     if (active && !renderTimer) {
-      renderTimer = setInterval(scheduleRender, 500);
+      renderTimer = setInterval(tick, 500);
       window.addEventListener('scroll', scheduleRender, true);
       window.addEventListener('resize', scheduleRender);
     } else if (!active && renderTimer) {
@@ -553,43 +565,126 @@
   // ---------------------------------------------------------------------------
   // God-mode actions
   // ---------------------------------------------------------------------------
-  function toggleReveal() {
-    const fc = getFC();
-    syncForm(fc);
-    if (!fc) return { error: 'No model-driven form found on this page.' };
-
-    if (state.revealActive) {
-      // Re-hide in reverse order (controls, sections, tabs).
-      [...state.revealed].reverse().forEach(({ kind, name }) => {
-        const obj = lookup(fc, kind, name);
-        safe(() => obj.setVisible(false));
-      });
-      const n = state.revealed.length;
-      state.revealed = [];
-      state.revealActive = false;
-      updateRenderLoop();
-      toast(`Re-hid ${n} item(s)`);
-      return { active: false, count: n };
-    }
-
-    const changed = [];
+  // Each apply* function overrides whatever is currently hidden / disabled / required on the form,
+  // records what it changed (once per item, keeping the original state) and returns how many
+  // items it touched. They run when a toggle is turned on and on every tick while it stays on,
+  // so the override survives slow loading, OnLoad scripts, lazy tabs and record navigation.
+  function applyReveal(fc) {
+    let n = 0;
     const showIfHidden = (kind, obj) => {
       const name = safe(() => obj.getName(), '');
       if (!name || typeof obj.getVisible !== 'function' || typeof obj.setVisible !== 'function') return;
       if (safe(() => obj.getVisible(), true) === false) {
         try {
           obj.setVisible(true);
-          changed.push({ kind, name });
+          n++;
+          if (!wasRevealed(kind, name)) state.revealed.push({ kind, name });
         } catch { /* some control types refuse */ }
       }
     };
     getTabs(fc).forEach((t) => showIfHidden('tab', t));
     getSections(fc).forEach(({ section }) => showIfHidden('section', section));
     getControls(fc).forEach((c) => showIfHidden('control', c));
+    return n;
+  }
 
-    state.revealed = changed;
+  function applyUnlock(fc) {
+    let n = 0;
+    getControls(fc).forEach((c) => {
+      if (typeof c.getDisabled !== 'function' || typeof c.setDisabled !== 'function') return;
+      if (safe(() => c.getDisabled(), false) === true) {
+        try {
+          c.setDisabled(false);
+          n++;
+          const name = c.getName();
+          if (!state.unlocked.includes(name)) state.unlocked.push(name);
+        } catch { /* ignore */ }
+      }
+    });
+    return n;
+  }
+
+  function applyOptional(fc) {
+    let n = 0;
+    forEachCol(fc.data.entity.attributes, (a) => {
+      const level = safe(() => a.getRequiredLevel(), 'none');
+      if (level && level !== 'none') {
+        try {
+          a.setRequiredLevel('none');
+          n++;
+          const name = a.getName();
+          if (!state.optional.some((o) => o.name === name)) state.optional.push({ name, level });
+        } catch { /* ignore */ }
+      }
+    });
+    return n;
+  }
+
+  const RESTORE_NAMES = { reveal: 'reveal hidden', unlock: 'unlock', optional: 'optional', labels: 'logical names' };
+
+  /** The enforcement tick: re-applies every active override to the current form. */
+  function enforce() {
+    const fc = getFC();
+    syncForm(fc);
+    if (!fc) return;
+    let n = 0;
+    if (state.revealActive) n += applyReveal(fc);
+    if (state.unlockActive) n += applyUnlock(fc);
+    if (state.optionalActive) n += applyOptional(fc);
+    if (state.restorePending) {
+      const names = state.restorePending;
+      state.restorePending = null;
+      if (n || names.includes('labels')) toast(`Restored: ${names.map((k) => RESTORE_NAMES[k]).join(', ')}`);
+    }
+  }
+
+  function revealOff(fc, quiet) {
+    // Re-hide in reverse order (controls, sections, tabs).
+    [...state.revealed].reverse().forEach(({ kind, name }) => {
+      const obj = lookup(fc, kind, name);
+      safe(() => obj.setVisible(false));
+    });
+    const n = state.revealed.length;
+    state.revealed = [];
+    state.revealActive = false;
+    updateRenderLoop();
+    if (!quiet) toast(`Re-hid ${n} item(s)`);
+    return { active: false, count: n };
+  }
+
+  function unlockOff(fc, quiet) {
+    state.unlocked.forEach((name) => safe(() => fc.ui.controls.get(name).setDisabled(true)));
+    const n = state.unlocked.length;
+    state.unlocked = [];
+    state.unlockActive = false;
+    updateRenderLoop();
+    if (!quiet) toast(`Re-locked ${n} field(s)`);
+    return { active: false, count: n };
+  }
+
+  function optionalOff(fc, quiet) {
+    state.optional.forEach(({ name, level }) => safe(() => fc.data.entity.attributes.get(name).setRequiredLevel(level)));
+    const n = state.optional.length;
+    state.optional = [];
+    state.optionalActive = false;
+    updateRenderLoop();
+    if (!quiet) toast(`Restored requirement on ${n} field(s)`);
+    return { active: false, count: n };
+  }
+
+  // Turning a toggle off works without a form (it just clears the desired state);
+  // turning one on from the popup / a shortcut still needs a form.
+  function toggleReveal() {
+    const fc = getFC();
+    syncForm(fc);
+    if (state.revealActive) return revealOff(fc);
+    if (!fc) return { error: 'No model-driven form found on this page.' };
+
+    state.revealed = [];
+    applyReveal(fc);
     state.revealActive = true;
     updateRenderLoop();
+    const changed = state.revealed;
     const counts = ['tab', 'section', 'control'].map((k) => changed.filter((c) => c.kind === k).length);
     toast(changed.length
       ? `Revealed ${counts[0]} tab(s), ${counts[1]} section(s), ${counts[2]} field(s)`
@@ -600,68 +695,83 @@
   function toggleUnlock() {
     const fc = getFC();
     syncForm(fc);
+    if (state.unlockActive) return unlockOff(fc);
     if (!fc) return { error: 'No model-driven form found on this page.' };
-    if (state.unlockActive) {
-      state.unlocked.forEach((name) => safe(() => fc.ui.controls.get(name).setDisabled(true)));
-      const n = state.unlocked.length;
-      state.unlocked = [];
-      state.unlockActive = false;
-      toast(`Re-locked ${n} field(s)`);
-      return { active: false, count: n };
-    }
-    const changed = [];
-    getControls(fc).forEach((c) => {
-      if (typeof c.getDisabled !== 'function' || typeof c.setDisabled !== 'function') return;
-      if (safe(() => c.getDisabled(), false) === true) {
-        try {
-          c.setDisabled(false);
-          changed.push(c.getName());
-        } catch { /* ignore */ }
-      }
-    });
-    state.unlocked = changed;
+    state.unlocked = [];
+    applyUnlock(fc);
     state.unlockActive = true;
-    toast(changed.length ? `Unlocked ${changed.length} field(s)` : 'No locked fields on this form');
-    return { active: true, count: changed.length };
+    updateRenderLoop();
+    const n = state.unlocked.length;
+    toast(n ? `Unlocked ${n} field(s)` : 'No locked fields on this form');
+    return { active: true, count: n };
   }
 
   function toggleOptional() {
     const fc = getFC();
     syncForm(fc);
+    if (state.optionalActive) return optionalOff(fc);
     if (!fc) return { error: 'No model-driven form found on this page.' };
-    if (state.optionalActive) {
-      state.optional.forEach(({ name, level }) => safe(() => fc.data.entity.attributes.get(name).setRequiredLevel(level)));
-      const n = state.optional.length;
-      state.optional = [];
-      state.optionalActive = false;
-      toast(`Restored requirement on ${n} field(s)`);
-      return { active: false, count: n };
-    }
-    const changed = [];
-    forEachCol(fc.data.entity.attributes, (a) => {
-      const level = safe(() => a.getRequiredLevel(), 'none');
-      if (level && level !== 'none') {
-        try {
-          a.setRequiredLevel('none');
-          changed.push({ name: a.getName(), level });
-        } catch { /* ignore */ }
-      }
-    });
-    state.optional = changed;
+    state.optional = [];
+    applyOptional(fc);
     state.optionalActive = true;
-    toast(changed.length ? `Made ${changed.length} field(s) optional` : 'No required fields on this form');
-    return { active: true, count: changed.length };
+    updateRenderLoop();
+    const n = state.optional.length;
+    toast(n ? `Made ${n} field(s) optional` : 'No required fields on this form');
+    return { active: true, count: n };
   }
 
   function toggleLabels(force) {
-    state.labels = typeof force === 'boolean' ? force : !state.labels;
-    updateRenderLoop();
-    if (!getFC()) {
+    const want = typeof force === 'boolean' ? force : !state.labels;
+    if (want && !getFC()) {
       state.labels = false;
       updateRenderLoop();
       return { error: 'No model-driven form found on this page.' };
     }
+    state.labels = want;
+    updateRenderLoop();
     return { active: state.labels };
+  }
+
+  /**
+   * Re-applies toggles saved by the extension for this tab (after a page reload).
+   * Only turns toggles on; they are applied by the tick as soon as a form is there.
+   */
+  function restore(prefs) {
+    const p = prefs || {};
+    const turned = [];
+    const on = (key, flag) => {
+      if (!p[key] || state[flag]) return;
+      state[flag] = true;
+      turned.push(key);
+    };
+    on('reveal', 'revealActive');
+    on('unlock', 'unlockActive');
+    on('optional', 'optionalActive');
+    on('labels', 'labels');
+    if (turned.length) {
+      state.restorePending = turned;
+      updateRenderLoop();
+      enforce();
+    }
+    return { restored: turned };
+  }
+
+  /** Turns every toggle off the normal way (restoring what each one changed). */
+  function reset() {
+    const fc = getFC();
+    syncForm(fc);
+    const changed = [];
+    const devOn = status().monitor;
+    state.restorePending = null;
+    if (state.revealActive) { revealOff(fc, true); changed.push('reveal'); }
+    if (state.unlockActive) { unlockOff(fc, true); changed.push('unlock'); }
+    if (state.optionalActive) { optionalOff(fc, true); changed.push('optional'); }
+    if (state.labels) { state.labels = false; changed.push('labels'); }
+    if (state.picking) { stopPicking(); changed.push('picker'); }
+    if (devOn && commands.monitor) { safe(() => commands.monitor(false)); changed.push('monitor'); }
+    updateRenderLoop();
+    toast(changed.length ? 'All toggles reset' : 'Nothing to reset');
+    return { reset: true, changed };
   }
 
   // ---------------------------------------------------------------------------
@@ -1050,6 +1160,8 @@
     labels: toggleLabels,
     picker: togglePicker,
     panel: togglePanel,
+    restore,
+    reset,
   };
 
   window.__pafi = {

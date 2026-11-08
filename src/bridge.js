@@ -21,3 +21,56 @@ export async function runInTab(tabId, cmd, arg) {
   }
   return res ? res.result : null;
 }
+
+// ---------------------------------------------------------------------------
+// Per-tab toggle persistence (chrome.storage.session), so overrides survive a page reload.
+// Stored as `toggles:<tabId>` -> { host, reveal, unlock, optional, labels }. Only restored on the
+// same host, so unlock/optional confirmed for one org never carry into another org in the same tab.
+// ---------------------------------------------------------------------------
+const togglesKey = (tabId) => `toggles:${tabId}`;
+
+/** Host of a tab URL, or '' when the extension can't see it (not one of our hosts). */
+export function hostOf(url) {
+  try {
+    return url ? new URL(url).host : '';
+  } catch {
+    return '';
+  }
+}
+
+export async function tabHost(tabId) {
+  try {
+    return hostOf((await chrome.tabs.get(tabId)).url);
+  } catch {
+    return '';
+  }
+}
+
+export async function clearToggles(tabId) {
+  await chrome.storage.session.remove(togglesKey(tabId));
+}
+
+/** Saves the toggles from a page `status` result; removes the entry when none is on. */
+export async function saveToggles(tabId, status, host) {
+  if (!status || status.error || status.notLoaded) return;
+  const t = {
+    reveal: !!(status.reveal && status.reveal.active),
+    unlock: !!(status.unlock && status.unlock.active),
+    optional: !!(status.optional && status.optional.active),
+    labels: !!status.labels,
+  };
+  if (!host || !Object.values(t).some(Boolean)) return clearToggles(tabId);
+  await chrome.storage.session.set({ [togglesKey(tabId)]: { host, ...t } });
+}
+
+/** Stored toggles for this tab, or null. A different host drops the stored state. */
+export async function loadToggles(tabId, host) {
+  const key = togglesKey(tabId);
+  const saved = (await chrome.storage.session.get(key))[key];
+  if (!saved) return null;
+  if (!host || saved.host !== host) {
+    await clearToggles(tabId);
+    return null;
+  }
+  return saved;
+}
