@@ -171,5 +171,63 @@ const assert = (c, m) => { if (!c) { console.error('FAIL', m); process.exitCode 
   assert(await pop.isHidden('#guard'), 'guardrail: dev-tagged environment is not blocked');
   await pop.click('label:has(#optional)');
   await pop.screenshot({ path: path.join(out, 'popup.png'), fullPage: true });
+
+  // Toggles persist per tab across reloads (chrome.storage.session + background restore)
+  const SECRET = '[data-id="secretfield-FieldSectionItemContainer"]';
+  const stored = () => sw.evaluate(async (k) => (await chrome.storage.session.get(k))[k] || null, `toggles:${tabId}`);
+  const storedSoon = async (pred) => { // the popup writes storage right after it updates the checkboxes
+    for (let i = 0; i < 20; i++) { const v = await stored(); if (pred(v)) return v; await page.waitForTimeout(100); }
+    return stored();
+  };
+  const visibleSoon = (sel, want = true) => page.waitForFunction(([s, w]) => {
+    const el = document.querySelector(s);
+    return !!(el && el.offsetParent !== null) === w;
+  }, [sel, want], { timeout: 5000 }).then(() => true, () => false);
+  const reloadForm = async () => { await page.reload(); await page.waitForFunction(() => !!window.__pafi); };
+  const popReload = async () => { await pop.reload(); await pop.waitForSelector('#record dd'); };
+  let saved = await stored();
+  assert(saved && saved.host === 'contoso.crm.dynamics.com' && saved.reveal && !saved.unlock && !saved.optional, 'persist: popup saved toggles for tab+host ' + JSON.stringify(saved));
+  assert(!(await pop.isDisabled('#reset')), 'popup: reset enabled while a toggle is on');
+  await reloadForm();
+  assert(await visibleSoon(SECRET), 'restore: hidden field revealed again after reload');
+  assert((await run('status')).reveal.active, 'restore: status reports reveal active after reload');
+  await popReload();
+  assert(await pop.isChecked('#reveal'), 'restore: popup shows reveal on after reload');
+  const hidNow = await page.evaluate((s) => { Xrm.Page.ui.controls.get('secretfield').setVisible(false); return document.querySelector(s).offsetParent === null; }, SECRET);
+  assert(hidNow && await visibleSoon(SECRET), 'enforce: late setVisible(false) is revealed again by the tick');
+  await pop.click('label:has(#reveal)');
+  await pop.waitForFunction(() => !document.getElementById('reveal').checked);
+  assert(await visibleSoon(SECRET, false), 'reveal off re-hides recorded field after restore');
+  assert(await storedSoon((v) => v === null) === null, 'persist: nothing stored when all toggles are off');
+  await pop.click('label:has(#reveal)');
+  await pop.click('label:has(#labels)');
+  await pop.waitForFunction(() => document.getElementById('reveal').checked && document.getElementById('labels').checked);
+  saved = await storedSoon((v) => v && v.reveal && v.labels);
+  assert(saved && saved.reveal && saved.labels, 'persist: reveal + labels stored');
+  await pop.screenshot({ path: path.join(out, 'popup-reset.png'), clip: { x: 0, y: 0, width: 360, height: 100 } });
+  await pop.click('#reset');
+  await pop.waitForFunction(() => document.getElementById('reset').disabled);
+  const st = await run('status');
+  assert(!st.reveal.active && !st.unlock.active && !st.optional.active && !st.labels, 'reset: all toggles off in page');
+  assert(!(await pop.isChecked('#reveal')) && !(await pop.isChecked('#labels')) && !(await pop.isChecked('#unlock')) && !(await pop.isChecked('#optional')), 'reset: popup checkboxes unchecked');
+  assert(await pop.isDisabled('#reset'), 'reset: button disabled when nothing is on');
+  assert(!(await page.isVisible(SECRET)), 'reset: hidden field hidden again');
+  assert(await stored() === null, 'reset: stored toggles removed');
+  r = await run('reset');
+  assert(r.reset && r.changed.length === 0, 'reset: nothing to reset the second time');
+  await reloadForm();
+  await page.waitForTimeout(1500);
+  assert(!(await run('status')).reveal.active && !(await page.isVisible(SECRET)), 'reset: nothing restored after reload');
+  const sc = await sw.evaluate(() => chrome.runtime.getManifest().commands['reset-toggles']);
+  assert(sc && sc.suggested_key && sc.suggested_key.default === 'Alt+Shift+D', 'shortcut: reset-toggles is Alt+Shift+D');
+  const assigned = await sw.evaluate(async () => (await chrome.commands.getAll()).filter((c) => c.name !== '_execute_action' && !c.shortcut).map((c) => c.name));
+  assert(assigned.length === 0, 'shortcut: Chrome assigned every suggested key (missing: ' + assigned.join(', ') + ')');
+  // Stored toggles for another host are dropped, not applied.
+  await sw.evaluate(async (k) => chrome.storage.session.set({ [k]: { host: 'other.crm.dynamics.com', reveal: true, unlock: true, optional: false, labels: false } }), `toggles:${tabId}`);
+  await reloadForm();
+  await page.waitForTimeout(1500);
+  const st2 = await run('status');
+  assert(!st2.reveal.active && !st2.unlock.active && !(await page.isVisible(SECRET)), 'host mismatch: toggles not restored');
+  assert(await stored() === null, 'host mismatch: stored toggles dropped');
   await ctx.close();
 })();

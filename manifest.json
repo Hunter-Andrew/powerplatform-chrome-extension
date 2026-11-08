@@ -70,6 +70,12 @@
         "default": "Alt+Shift+H"
       },
       "description": "Reveal / re-hide all hidden tabs, sections and fields"
+    },
+    "reset-toggles": {
+      "suggested_key": {
+        "default": "Alt+Shift+D"
+      },
+      "description": "Turn all toggles off (restore the form)"
     }
   }
 }

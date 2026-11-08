@@ -14,6 +14,7 @@ The extension is **Power Apps Form Inspector**: developer tools for Power Apps m
 | **Reveal hidden** (`Alt+Shift+H`) | Shows every hidden tab, section and field. Each revealed item gets a dashed orange outline (and an orange badge). Toggle it off to re-hide exactly what was revealed. |
 | **Unlock read-only fields** | Turns on disabled controls. Toggle off to lock them again. |
 | **Make all fields optional** | Sets every required level to `none`, so you can save without filling required fields. Toggle off to restore the original levels. |
+| **Reset** (`Alt+Shift+D`) | The **↺ Reset** button at the top of the popup turns every toggle off at once: re-hides, re-locks and restores required levels exactly as each toggle does, hides the logical-name badges, cancels the picker and stops the Events monitor. Enabled only while a toggle is on. |
 | **Record info** | Shows entity, entity set, record ID, form name/ID and form type. Includes **Copy record URL** and **Open in Web API** (opens `/api/data/v9.2/<set>(<id>)`). |
 | **Environment info** | Shows org unique name, URL, version, app name/ID, user, user ID and security roles. Click any value to copy it. |
 | **Production guardrail** | The popup shows which environment you're on, color-coded (red = production, amber = test, green = dev). Before **Unlock read-only fields** or **Make all fields optional** turns on in production, it asks you to confirm. Pick the environment type from the drop-down to mark it. Unmarked orgs are guessed from their name (e.g. `contoso-dev`, `contoso-uat`); anything that doesn't look like dev or test is treated as production. Marks are saved per host in Chrome sync storage. |
@@ -32,11 +33,13 @@ The **Developer tools** buttons in the popup open a side panel on the form with 
 
 **Events monitor limits.** The form's OnLoad usually runs before the monitor can hook in. Turn the monitor on, then open another record in the same app to catch OnLoad. Form handlers are timed by wrapping the named functions in the page's script frames. If a handler can't be found by name, it's shown in the monitor summary, and you still see the ⚑ event rows.
 
-All overrides happen **client-side only**. They use the standard `Xrm` client API (`setVisible`, `setDisabled`, `setRequiredLevel`) and nothing is written to the form definition. Navigating to another record resets them.
+All overrides happen **client-side only**. They use the standard `Xrm` client API (`setVisible`, `setDisabled`, `setRequiredLevel`) and nothing is written to the form definition.
+
+**Toggles stay on in the tab.** Once you turn on Reveal hidden, Unlock read-only fields, Make all fields optional or Show logical names, it stays on in that browser tab until you turn it off (or use **Reset**): when you open another record or form, when you reload the page, and when the form hides, locks or requires something later (slow loading, OnLoad scripts, tabs that load on demand). The state is kept per tab and per host in Chrome session storage, which is cleared when the tab or the browser closes. It's only restored on the same org: if you open a different org in that tab, the saved state is dropped, so an Unlock you confirmed for a dev org never carries into production.
 
 ## Permissions and privileges
 
-The extension only uses the `activeTab`, `scripting` and `storage` permissions, plus host access to Dynamics domains. Most tools use only the client-side `Xrm` API and work for any user who can open the form.
+The extension only uses the `activeTab`, `scripting` and `storage` permissions, plus host access to Dynamics domains. `storage` holds your environment marks (sync storage) and which toggles are on in each tab (session storage, cleared when the browser closes). Most tools use only the client-side `Xrm` API and work for any user who can open the form.
 
 The Developer tools panel also makes **read-only Web API GET requests** with your own session. It never writes anything. If a privilege is missing, that part of the panel shows an error and the rest keeps working:
 
@@ -56,12 +59,13 @@ Stages, steps, option values and lookups come from the client API, so they show 
 3. Click **Load unpacked** and select the repository folder.
 4. Pin the extension, then open a model-driven app record.
 
-You can change shortcuts at `chrome://extensions/shortcuts`.
+Default shortcuts: `Alt+Shift+I` pick element, `Alt+Shift+L` logical names, `Alt+Shift+H` reveal hidden, `Alt+Shift+D` reset all toggles. Chrome doesn't assign a suggested shortcut that's already taken, so check `chrome://extensions/shortcuts`; you can change them there too.
 
 ## How it works
 
 - `src/main.js` runs in the page's **MAIN world** (needs Chrome 111+) so it can reach `window.Xrm`. It exposes `window.__pafi.run(cmd)`. `src/devtools.js` loads right after it and adds the Developer tools panel commands (`dev`, `monitor`).
 - The popup and the keyboard shortcuts call it through `chrome.scripting.executeScript` (`src/bridge.js`). If the script isn't on the page yet (for example, the tab was open before you installed the extension), the bridge injects it on demand.
+- After each toggle change the popup and the service worker save the toggles for the tab (`chrome.storage.session`, key `toggles:<tabId>`, with the host). When the tab finishes loading, the service worker sends them back to the page with the `restore` command. On the page, the toggles are the desired state: while any is on, a 500 ms tick re-applies it to whatever is currently hidden, disabled or required and records what it changed, so turning it off restores only that.
 - The picker maps DOM to components using Unified Interface attributes (`data-id="<control>-FieldSectionItemContainer"`, `data-control-name`, `data-lp-id`, `section[data-id]`, `data-id="tablist-<tab>"`). It then **checks each candidate against `Xrm`**, so it only reports names that actually exist on the form.
 - The overlays are drawn in a Shadow DOM layer and never touch the app's React DOM.
 
@@ -82,8 +86,8 @@ manifest.json        Extension manifest (MV3)
 src/main.js          Page-world script: Xrm access, picker, overlays, panel, overrides
 src/devtools.js      Page-world script: Developer tools panel (events, logic, options, lookups, process)
 src/env.js           Environment classification for the production guardrail (popup)
-src/bridge.js        Runs commands in the page via chrome.scripting (shared by popup + worker)
-src/background.js    Service worker: keyboard shortcuts
+src/bridge.js        Runs commands in the page via chrome.scripting; saves per-tab toggles (shared by popup + worker)
+src/background.js    Service worker: keyboard shortcuts, re-applies toggles after a page reload
 popup/               Toolbar popup (HTML/CSS/JS)
 icons/               Extension icons
 test/                Mock UCI form, Web API fixtures + Playwright end-to-end test
